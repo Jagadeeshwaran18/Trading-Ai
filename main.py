@@ -7,41 +7,39 @@ from logger import ExcelLogger
 import config
 
 def trading_job(client, ai, logger):
-    print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting trading cycle for {config.TARGET_SYMBOL}...")
-    
-    try:
-        # 1. Fetch Spot Price
-        print("Fetching spot price...")
-        spot_price = client.get_spot_price(config.TARGET_SYMBOL)
-        if spot_price is None:
-            print("Error: Could not fetch spot price. Skipping cycle.")
-            return
+    for symbol in config.WATCHLIST:
+        print(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Monitoring {symbol}...")
+        
+        try:
+            # 1. Fetch Spot Price
+            spot_price = client.get_spot_price(symbol)
+            if spot_price is None:
+                print(f"Error: Could not fetch spot price for {symbol}. Skipping.")
+                continue
 
-        # 2. Fetch Historical Data (for RSI/MA)
-        print("Fetching historical data...")
-        hist_data = client.get_intraday_data(config.TARGET_SYMBOL)
+            # 2. Fetch Historical Data
+            hist_data = client.get_intraday_data(symbol)
 
-        # 3. Fetch Options Chain
-        print("Fetching options chain...")
-        options_chain = client.get_options_chain(config.TARGET_SYMBOL)
+            # 3. Fetch Options Chain
+            options_chain = client.get_options_chain(symbol)
 
-        # 4. Generate Signals
-        print("Analyzing data and generating signals...")
-        signals = ai.generate_signals(spot_price, options_chain, hist_data)
+            # 4. Generate Signals
+            signals = ai.generate_signals(symbol, spot_price, options_chain, hist_data)
 
-        # 5. Log to Excel
-        if signals:
-            logger.log_signals(signals)
-        else:
-            print("No significant signals generated this cycle.")
+            # 5. Log to Excel
+            if signals:
+                logger.log_signals(signals)
+                print(f"Successfully processed {symbol}.")
+            else:
+                print(f"No significant signals for {symbol}.")
 
-    except Exception as e:
-        print(f"Critical error during trading cycle: {e}")
+        except Exception as e:
+            print(f"Error processing {symbol}: {e}")
 
 def main():
     print("---------------------------------------------------------")
     print("   AI STOCK OPTION TRADING ASSISTANT INITIALIZED         ")
-    print(f"   Target: {config.TARGET_SYMBOL} | Interval: {config.INTERVAL_MINUTES} min")
+    print(f"   Watchlist: {', '.join(config.WATCHLIST)} | Interval: {config.INTERVAL_MINUTES} min")
     print("---------------------------------------------------------")
 
     # Initialize Components

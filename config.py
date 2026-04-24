@@ -5,7 +5,7 @@ ALPHA_VANTAGE_API_KEY = "DVG3P73P244R3LC5"
 BASE_URL = "https://www.alphavantage.co/query"
 
 # Trading Parameters
-TARGET_SYMBOL = "SPY"  # Stock to monitor
+WATCHLIST = ["SPY", "^NSEI", "^NSEBANK", "BTC-USD", "ETH-USD"]  # Stocks, Indices, and Crypto
 INTERVAL_MINUTES = 3
 RISK_FREE_RATE = 0.05  # Approximate risk-free rate (5%)
 

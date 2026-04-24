@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuantumTrade AI | Live Tracking</title>
+    <link rel="stylesheet" href="style.css?v=15">
+    <!-- Google Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap"
+        rel="stylesheet">
+    <script src="lucide.js"></script>
+    <script src="lightweight-charts.js"></script>
+</head>
+
+<body>
+
+    <!-- HOME VIEW: List of trackers -->
+    <div id="homeView">
+        <header class="navbar">
+            <div class="logo">
+                <i data-lucide="zap" class="icon-brand"></i>
+                <h1>QuantumTrade <span>AI</span></h1>
+            </div>
+            <div class="status-indicator">
+                <span class="live-clock" id="liveClock">00:00:00</span>
+                <button id="openChatBtn" class="btn-chat">
+                    <i data-lucide="message-circle"></i> Chat AI
+                </button>
+                <span class="dot"></span> Live Tracking
+            </div>
+        </header>
+
+        <main class="home-main">
+            <h2>Live Asset Trackers</h2>
+            <p class="subtitle">Select a tracker to view live trends and full analysis.</p>
+
+            <div id="trackerGrid" class="tracker-grid">
+                <!-- Trackers populated here by app.js -->
+            </div>
+        </main>
+    </div>
+
+    <!-- CHART VIEW: Full screen chart -->
+    <div id="chartView" class="view-hidden">
+        <header class="chart-header glass">
+            <div class="chart-header-left">
+                <button id="backBtn" class="btn-icon">
+                    <i data-lucide="arrow-left"></i> Back
+                </button>
+                <div class="asset-info">
+                    <h2 id="activeSymbol">Loading...</h2>
+                    <span id="activePrice" class="price-large">--</span>
+                    <span id="activeChange" class="change-percent">--</span>
+                </div>
+            </div>
+
+            <div class="chart-controls">
+                <div class="toolbar">
+                    <!-- Unified Timeframe Dropdown -->
+                    <div class="dropdown" id="timeframeDropdown">
+                        <button class="btn-dropdown" id="timeframeDropdownBtn">
+                            <span><i data-lucide="clock" class="inline-icon"></i> 1m</span>
+                            <i data-lucide="chevron-down" class="inline-icon"></i>
+                        </button>
+                        <div class="dropdown-content">
+                            <div class="dropdown-header">Live Tracking</div>
+                            <a href="#" class="timeframe-option" data-range="1d" data-interval="1m"
+                                data-speed="1000">1s</a>
+                            <a href="#" class="timeframe-option" data-range="1d" data-interval="1m"
+                                data-speed="3000">3s</a>
+                            <a href="#" class="timeframe-option" data-range="1d" data-interval="1m"
+                                data-speed="5000">5s</a>
+
+                            <div class="dropdown-header">Intraday</div>
+                            <a href="#" class="timeframe-option active" data-range="1d" data-interval="1m"
+                                data-speed="10000">1m</a>
+                            <a href="#" class="timeframe-option" data-range="1d" data-interval="5m"
+                                data-speed="10000">5m</a>
+                            <a href="#" class="timeframe-option" data-range="5d" data-interval="15m"
+                                data-speed="10000">15m</a>
+                            <a href="#" class="timeframe-option" data-range="1mo" data-interval="1h"
+                                data-speed="10000">1h</a>
+
+                            <div class="dropdown-header">Long Term</div>
+                            <a href="#" class="timeframe-option" data-range="1y" data-interval="1d"
+                                data-speed="10000">1D</a>
+                            <a href="#" class="timeframe-option" data-range="5y" data-interval="1wk"
+                                data-speed="10000">1W</a>
+                            <a href="#" class="timeframe-option" data-range="10y" data-interval="1mo"
+                                data-speed="10000">1M</a>
+                        </div>
+                    </div>
+                </div>
+                <button id="aiBtn" class="btn-ai">
+                    <i data-lucide="sparkles"></i> AI Analysis
+                </button>
+                <button id="downloadBtn" class="btn-primary">
+                    <i data-lucide="download"></i> Download Excel
+                </button>
+            </div>
+        </header>
+
+        <div class="fullscreen-chart-wrapper">
+            <div id="chartContainer"></div>
+
+            <!-- AI Side Panel -->
+            <div id="aiPanel" class="ai-panel glass hide-panel">
+                <div class="ai-panel-header">
+                    <h3><i data-lucide="brain-circuit"></i> AI Reasoning</h3>
+                    <button id="closeAiBtn" class="btn-close">×</button>
+                </div>
+                <div class="ai-panel-content">
+                    <div id="aiSignalBadge" class="ai-signal-badge">NEUTRAL</div>
+                    <div class="ai-confidence">
+                        <span>Confidence</span>
+                        <div class="progress-bar">
+                            <div id="aiConfidenceBar" style="width: 0%"></div>
+                        </div>
+                        <span id="aiConfidenceText">0%</span>
+                    </div>
+
+                    <div class="ai-metrics-grid">
+                        <div class="metric-item">
+                            <label>RSI (14)</label>
+                            <span id="aiMetricRsi">--</span>
+                        </div>
+                        <div class="metric-item">
+                            <label>Trend</label>
+                            <span id="aiMetricTrend">--</span>
+                        </div>
+                    </div>
+
+                    <div class="ai-reasoning-box">
+                        <p id="aiReasoningText">Analyzing market patterns... Click the sparkle icon while a chart is
+                            loaded to begin deep evaluation.</p>
+                    </div>
+                </div>
+                <div class="ai-panel-footer">
+                    <span class="refresh-indicator"><i data-lucide="refresh-cw" class="icon-spin"></i> Live AI
+                        Monitoring</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Chat AI Window -->
+    <div id="chatWindow" class="chat-window hide-chat">
+        <div class="chat-header">
+            <div class="chat-title">
+                <i data-lucide="bot"></i>
+                <span>Quantum Assistant</span>
+            </div>
+            <button id="closeChatBtn" class="btn-close-chat">&times;</button>
+        </div>
+        <div id="chatMessages" class="chat-messages">
+            <div class="message bot-message">
+                Hello! I am your AI trading assistant. Ask me anything about the markets or current indicators.
+            </div>
+        </div>
+        <div class="chat-input-area">
+            <input type="text" id="chatInput" placeholder="Ask a question..." autocomplete="off">
+            <button id="sendChatBtn" class="btn-send">
+                <i data-lucide="send"></i>
+            </button>
+        </div>
+    </div>
+
+    <script src="app_view.js?v=15"></script>
+</body>
+
+</html>

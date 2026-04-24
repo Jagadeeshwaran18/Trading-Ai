@@ -1,6 +1,10 @@
 import yfinance as yf
 import pandas as pd
+import logging
 from config import ALPHA_VANTAGE_API_KEY, BASE_URL
+
+# Suppress yfinance delisted/no price data warnings for missing intraday Indian indices
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
 
 class AlphaVantageClient:
     def __init__(self, api_key=ALPHA_VANTAGE_API_KEY):
@@ -46,7 +50,10 @@ class AlphaVantageClient:
         """Fetches historical data using yfinance."""
         ticker = yf.Ticker(symbol)
         try:
-            df = ticker.history(period="1d", interval=interval)
+            df = ticker.history(period="5d", interval=interval)
+            if df.empty:
+                # Fallback to daily data if intraday fails (common for Indian Indices on free yfinance)
+                df = ticker.history(period="1mo", interval="1d")
             df.columns = [c.lower() for c in df.columns]
             return df
         except Exception:

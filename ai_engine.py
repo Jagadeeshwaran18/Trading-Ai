@@ -15,7 +15,7 @@ class TradingAI:
         rs = gain / loss
         return 100 - (100 / (1 + rs))
 
-    def generate_signals(self, spot_price, options_chain, historical_data):
+    def generate_signals(self, symbol, spot_price, options_chain, historical_data):
         """
         Analyzes options and market context to generate signals.
         Returns a list of significant signals.
@@ -35,8 +35,41 @@ class TradingAI:
             trend = "NEUTRAL"
 
         # 2. Process Options Chain
-        # We look for liquid, near-the-money options
-        if options_chain.empty:
+        # If no options, still log the spot analysis
+        if options_chain is None or options_chain.empty:
+            spot_action = "HOLD"
+            spot_confidence = 0
+            
+            # Simple Spot AI Logic
+            if trend == "BULLISH" and latest_rsi < 65:
+                spot_action = "BUY"
+                spot_confidence = 100 - latest_rsi
+            elif trend == "BEARISH" and latest_rsi > 35:
+                spot_action = "SELL"
+                spot_confidence = latest_rsi
+            elif latest_rsi > 75:
+                spot_action = "SELL"
+                spot_confidence = 80
+            elif latest_rsi < 25:
+                spot_action = "BUY"
+                spot_confidence = 80
+
+            signals.append({
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "symbol": symbol,
+                "option_type": "SPOT",
+                "strike": 0,
+                "expiry": "N/A",
+                "spot": spot_price,
+                "delta": 0,
+                "gamma": 0,
+                "theta": 0,
+                "iv": 0,
+                "rsi": round(latest_rsi, 2),
+                "trend": trend,
+                "action": spot_action,
+                "confidence": round(spot_confidence, 1)
+            })
             return signals
 
         # Filter for relevant strikes (e.g., within 5% of spot)
@@ -89,7 +122,7 @@ class TradingAI:
             # Always add to log so the user can see everything in Excel
             signals.append({
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "symbol": self.config.TARGET_SYMBOL,
+                "symbol": symbol,
                 "option_type": option_type.upper(),
                 "strike": strike,
                 "expiry": expiry_str,
@@ -104,4 +137,9 @@ class TradingAI:
                 "confidence": round(confidence, 1)
             })
 
+        # Return only the single best signal to keep logs clean
+        if signals:
+            best_signal = sorted(signals, key=lambda x: (x['confidence'], -abs(x['spot'] - x['strike'])), reverse=True)[0]
+            return [best_signal]
+            
         return signals
