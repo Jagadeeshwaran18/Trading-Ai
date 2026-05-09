@@ -9,8 +9,30 @@ const activeSymbolEl = document.getElementById('activeSymbol');
 const activePriceEl = document.getElementById('activePrice');
 const activeChangeEl = document.getElementById('activeChange');
 const backBtn = document.getElementById('backBtn');
-const downloadBtn = document.getElementById('downloadBtn');
+const viewExcelBtn = document.getElementById('viewExcelBtn');
+const excelView = document.getElementById('excelView');
+const excelBackBtn = document.getElementById('excelBackBtn');
+const downloadExcelBtn = document.getElementById('downloadExcelBtn');
+const excelActiveSymbol = document.getElementById('excelActiveSymbol');
+const excelTableHead = document.getElementById('excelTableHead');
+const excelTableBody = document.getElementById('excelTableBody');
 const timeframes = document.querySelectorAll('.timeframe');
+
+// Strategy DOM Elements
+const strategyView = document.getElementById('strategyView');
+const openStrategyBtn = document.getElementById('openStrategyBtn');
+const strategyBackBtn = document.getElementById('strategyBackBtn');
+const refreshStrategyBtn = document.getElementById('refreshStrategyBtn');
+const strategyGrid = document.getElementById('strategyGrid');
+const excelActionFilter = document.getElementById('excelActionFilter');
+const excelDateFilter = document.getElementById('excelDateFilter');
+
+// Prediction DOM Elements
+const predictionView = document.getElementById('predictionView');
+const openPredictionBtn = document.getElementById('openPredictionBtn');
+const predictionBackBtn = document.getElementById('predictionBackBtn');
+const predictionActiveSymbol = document.getElementById('predictionActiveSymbol');
+const horizonBtns = document.querySelectorAll('.horizon-btn');
 
 // State Management
 let activeSymbol = null;
@@ -19,6 +41,12 @@ let activeInterval = "1m";
 let liveTickSpeed = 10000;
 let chart = null;
 let candleSeries = null;
+let activeExcelData = [];
+
+// Prediction State
+let predictionChart = null;
+let predictionLineSeries = null;
+let activeHorizon = '1y';
 
 // Polling timers
 let watchlistTimer = null;
@@ -29,6 +57,9 @@ let marketDataTimer = null;
  */
 function showHomeView() {
     chartView.classList.add('view-hidden');
+    excelView.classList.add('view-hidden');
+    strategyView.classList.add('view-hidden');
+    predictionView.classList.add('view-hidden');
     homeView.classList.remove('view-hidden');
 
     // Stop market polling
@@ -195,45 +226,31 @@ async function fetchMarketData(fitContent = false) {
 
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
-        const data = await response.json();
+        const rawData = await response.json();
 
-        if (data.error) {
-            throw new Error(data.error);
+        if (rawData.error) {
+            throw new Error(rawData.error);
         }
+
+        const data = rawData.data;
+        const prevDayClose = rawData.previousClose;
 
         if (data && data.length > 0) {
             if (data[0].time === undefined || data[0].close === undefined) {
                 throw new Error("Server returned corrupt or unexpected data format.");
             }
 
-            // SIMULATED LIVE TICK ENGINE 
-            if (isLiveSimMode && !fitContent) {
-                // We are in hyper-tick mode and just pulling live data updates!
-                const livePrice = data[data.length - 1].close;
-                const newPosTime = Math.floor(Date.now() / 1000);
-
-                try {
-                    candleSeries.update({
-                        time: newPosTime,
-                        open: livePrice,
-                        high: livePrice,
-                        low: livePrice,
-                        close: livePrice
-                    });
-                } catch (e) {
-                    // Fallback to setting data if update fails due to timeline geometry
-                    candleSeries.setData(data);
-                }
-            } else {
-                candleSeries.setData(data);
-                if (fitContent) {
-                    chart.timeScale().fitContent();
-                }
+            // Update the chart with the real data from the server
+            // This ensures we show proper candles forming instead of flat lines
+            candleSeries.setData(data);
+            if (fitContent) {
+                chart.timeScale().fitContent();
             }
 
             // Update Header
             const lastPrice = data[data.length - 1].close;
-            const prevPrice = data[0].close;
+            // Use true previous close for 1D range to match home view, otherwise use the first candle of the range
+            const prevPrice = activeRange === "1d" ? prevDayClose : data[0].close;
             const change = ((lastPrice - prevPrice) / prevPrice * 100).toFixed(2);
 
             activeSymbolEl.innerText = activeSymbol;
@@ -266,7 +283,7 @@ async function fetchMarketData(fitContent = false) {
 function pollWatchlist() {
     if (activeSymbol) return; // Don't poll watchlist if in chart view
     fetchWatchlist().finally(() => {
-        watchlistTimer = setTimeout(pollWatchlist, 15000); // Poll every 15s
+        watchlistTimer = setTimeout(pollWatchlist, 3000); // Poll every 3s for fast real-time updates
     });
 }
 
@@ -282,35 +299,42 @@ function pollMarketData(fitContent = false) {
  */
 backBtn.onclick = () => showHomeView();
 
-// Dropdown Toggle Logic
-const dropdownBtn = document.getElementById('timeframeDropdownBtn');
-const dropdownContent = document.querySelector('.dropdown-content');
+// Global Dropdown Toggle Logic
+document.querySelectorAll('.dropdown').forEach(dropdown => {
+    const btn = dropdown.querySelector('.btn-dropdown');
+    const content = dropdown.querySelector('.dropdown-content');
+    
+    if (btn && content) {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            
+            // Close other dropdowns first
+            document.querySelectorAll('.dropdown-content.show').forEach(c => {
+                if (c !== content) c.classList.remove('show');
+            });
+            
+            content.classList.toggle('show');
+        });
+    }
+});
+
+// Close all dropdowns if clicked outside
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.dropdown')) {
+        document.querySelectorAll('.dropdown-content.show').forEach(c => c.classList.remove('show'));
+    }
+});
 
 let isLiveSimMode = false;
-
-if (dropdownBtn && dropdownContent) {
-    dropdownBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        dropdownContent.classList.toggle('show');
-    });
-
-    // Close dropdown if clicked outside
-    document.addEventListener('click', (e) => {
-        if (!e.target.closest('.dropdown')) {
-            if (dropdownContent.classList.contains('show')) {
-                dropdownContent.classList.remove('show');
-            }
-        }
-    });
-}
 
 // Unified Selectors
 document.querySelectorAll('.timeframe-option').forEach(btn => {
     btn.addEventListener('click', (e) => {
         e.preventDefault();
 
-        if (dropdownContent) {
-            dropdownContent.classList.remove('show');
+        const content = btn.closest('.dropdown-content');
+        if (content) {
+            content.classList.remove('show');
         }
 
         document.querySelectorAll('.timeframe-option').forEach(b => b.classList.remove('active'));
@@ -390,11 +414,198 @@ async function updateAIAnalysis() {
     }
 }
 
-downloadBtn.onclick = () => {
-    if (activeSymbol) {
-        window.location.href = `/api/download/${activeSymbol}`;
+if (viewExcelBtn) {
+    viewExcelBtn.onclick = async () => {
+        if (!activeSymbol) return;
+        
+        // Hide chart view and show excel view
+        chartView.classList.add('view-hidden');
+        excelView.classList.remove('view-hidden');
+        excelActiveSymbol.innerText = activeSymbol + " Data Logs";
+        excelTableHead.innerHTML = '<th>Loading...</th>';
+        excelTableBody.innerHTML = '';
+        
+        try {
+            const response = await fetch(`/api/logs/${activeSymbol}`);
+            const data = await response.json();
+            
+            if (data && data.length > 0) {
+                activeExcelData = data;
+                // Generate headers dynamically from the first row
+                const headers = Object.keys(data[0]);
+                excelTableHead.innerHTML = headers.map(h => `<th>${h.charAt(0).toUpperCase() + h.slice(1)}</th>`).join('');
+                
+                // Reset filters to default
+                if(excelActionFilter) excelActionFilter.value = "ALL";
+                if(excelDateFilter) excelDateFilter.value = "ALL";
+                
+                renderFilteredExcelTable();
+            } else {
+                activeExcelData = [];
+                excelTableHead.innerHTML = '<th>No data found</th>';
+                excelTableBody.innerHTML = '';
+            }
+        } catch (err) {
+            console.error("Failed to fetch logs:", err);
+            excelTableHead.innerHTML = '<th>Error loading data</th>';
+        }
+    };
+}
+
+if (excelBackBtn) {
+    excelBackBtn.onclick = () => {
+        excelView.classList.add('view-hidden');
+        chartView.classList.remove('view-hidden');
+    };
+}
+
+if (downloadExcelBtn) {
+    downloadExcelBtn.onclick = () => {
+        if (activeSymbol) {
+            const actionVal = excelActionFilter ? excelActionFilter.value : "ALL";
+            const dateVal = excelDateFilter ? excelDateFilter.value : "ALL";
+            window.location.href = `/api/download/${activeSymbol}?action=${actionVal}&date_range=${dateVal}`;
+        }
+    };
+}
+
+function renderFilteredExcelTable() {
+    if (!activeExcelData || activeExcelData.length === 0) {
+        excelTableBody.innerHTML = '';
+        return;
     }
-};
+    
+    const actionVal = excelActionFilter ? excelActionFilter.value : "ALL";
+    const dateVal = excelDateFilter ? excelDateFilter.value : "ALL";
+    
+    let filteredData = activeExcelData;
+    
+    if (actionVal !== "ALL") {
+        filteredData = filteredData.filter(row => row.action === actionVal);
+    }
+    
+    if (dateVal !== "ALL") {
+        const now = new Date();
+        now.setHours(0,0,0,0);
+        let cutoffTime = 0;
+        
+        if (dateVal === "today") cutoffTime = now.getTime();
+        else if (dateVal === "3d") cutoffTime = now.getTime() - (3 * 24 * 60 * 60 * 1000);
+        else if (dateVal === "1w") cutoffTime = now.getTime() - (7 * 24 * 60 * 60 * 1000);
+        else if (dateVal === "1m") cutoffTime = now.getTime() - (30 * 24 * 60 * 60 * 1000);
+        
+        filteredData = filteredData.filter(row => {
+            const rowTime = new Date(row.timestamp.replace(' ', 'T')).getTime();
+            return rowTime >= cutoffTime;
+        });
+    }
+    
+    const headers = Object.keys(activeExcelData[0]);
+    excelTableBody.innerHTML = filteredData.map(row => {
+        return '<tr>' + headers.map(h => `<td>${row[h] !== null && row[h] !== undefined ? row[h] : ''}</td>`).join('') + '</tr>';
+    }).join('');
+}
+
+if (excelActionFilter) excelActionFilter.onchange = renderFilteredExcelTable;
+if (excelDateFilter) excelDateFilter.onchange = renderFilteredExcelTable;
+
+/**
+ * Strategy Recommendations Logic
+ */
+function showStrategyView() {
+    homeView.classList.add('view-hidden');
+    chartView.classList.add('view-hidden');
+    excelView.classList.add('view-hidden');
+    strategyView.classList.remove('view-hidden');
+    
+    // Stop polling
+    if (watchlistTimer) clearTimeout(watchlistTimer);
+    if (marketDataTimer) clearTimeout(marketDataTimer);
+    
+    fetchAndRenderStrategies();
+}
+
+if (openStrategyBtn) {
+    openStrategyBtn.onclick = () => showStrategyView();
+}
+
+if (strategyBackBtn) {
+    strategyBackBtn.onclick = () => {
+        strategyView.classList.add('view-hidden');
+        showHomeView();
+    };
+}
+
+if (refreshStrategyBtn) {
+    refreshStrategyBtn.onclick = () => fetchAndRenderStrategies();
+}
+
+async function fetchAndRenderStrategies() {
+    if (!strategyGrid) return;
+    strategyGrid.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--text-muted);">Fetching live global strategies...</div>';
+    
+    try {
+        const response = await fetch('/api/signals?limit=30');
+        const data = await response.json();
+        
+        if (!data || data.length === 0) {
+            strategyGrid.innerHTML = '<div style="padding: 2rem; color: var(--text-muted);">No strategies available at the moment.</div>';
+            return;
+        }
+        
+        strategyGrid.innerHTML = '';
+        
+        data.forEach(signal => {
+            // Convert global server timestamp to user's local timezone visually
+            const dateObj = new Date(signal.timestamp.replace(' ', 'T'));
+            const localTimeStr = dateObj.toLocaleString([], {
+                month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+            
+            const badgeClass = signal.action.toLowerCase();
+            const optionText = signal.option_type === "SPOT" ? "SPOT" : `${signal.option_type} ${signal.strike}`;
+            
+            const card = document.createElement('div');
+            card.className = 'strategy-card';
+            card.innerHTML = `
+                <div class="strategy-header">
+                    <span class="strategy-symbol">${signal.symbol} <span style="font-size:0.8rem; color:var(--text-muted)">${optionText}</span></span>
+                    <span class="strategy-time" title="Local Time"><i data-lucide="globe" class="inline-icon" style="width:12px;height:12px;"></i> ${localTimeStr}</span>
+                </div>
+                <div class="strategy-body">
+                    <div class="strategy-row">
+                        <span>Current Price</span>
+                        <span>$${parseFloat(signal.spot).toFixed(2)}</span>
+                    </div>
+                    <div class="strategy-row">
+                        <span>RSI (14)</span>
+                        <span>${signal.rsi}</span>
+                    </div>
+                    <div class="strategy-row">
+                        <span>Trend</span>
+                        <span>${signal.trend}</span>
+                    </div>
+                    <div class="strategy-row">
+                        <span>Confidence</span>
+                        <span>${parseFloat(signal.confidence).toFixed(1)}%</span>
+                    </div>
+                </div>
+                <div class="strategy-footer">
+                    <span style="font-size:0.8rem; color:var(--text-muted);">AI Engine Evaluated</span>
+                    <span class="strategy-badge ${badgeClass}">${signal.action}</span>
+                </div>
+            `;
+            strategyGrid.appendChild(card);
+        });
+        
+        lucide.createIcons();
+        
+    } catch (err) {
+        console.error("Failed to fetch strategies:", err);
+        strategyGrid.innerHTML = '<div style="color: var(--bearish); padding: 1rem;">Error loading strategies. Check server connection.</div>';
+    }
+}
 
 // Start the app in Home View
 pollWatchlist();
@@ -526,3 +737,103 @@ if (chatInput) {
 
 // Start the real-time clock
 startClock();
+
+/**
+ * Future Prediction Logic (Dedicated View)
+ */
+function showPredictionView() {
+    if (!activeSymbol) return; // Must have an active symbol selected
+    
+    chartView.classList.add('view-hidden');
+    excelView.classList.add('view-hidden');
+    strategyView.classList.add('view-hidden');
+    homeView.classList.add('view-hidden');
+    predictionView.classList.remove('view-hidden');
+    
+    predictionActiveSymbol.innerText = activeSymbol;
+    
+    // Stop all background polling/charts from main view
+    if (watchlistTimer) clearTimeout(watchlistTimer);
+    if (marketDataTimer) clearTimeout(marketDataTimer);
+    
+    initPredictionChart();
+    fetchPredictionData(activeHorizon);
+}
+
+function initPredictionChart() {
+    const container = document.getElementById('predictionChartContainer');
+    if (!predictionChart) {
+        // Ensure container has dimensions, or fallback to window dimensions
+        const cWidth = container.clientWidth > 0 ? container.clientWidth : window.innerWidth - 64;
+        const cHeight = container.clientHeight > 0 ? container.clientHeight : window.innerHeight - 200;
+
+        predictionChart = LightweightCharts.createChart(container, {
+            width: cWidth,
+            height: cHeight,
+            layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#94a3b8' },
+            grid: { vertLines: { color: 'rgba(255, 255, 255, 0.05)' }, horzLines: { color: 'rgba(255, 255, 255, 0.05)' } },
+            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+            rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.1)' },
+            timeScale: { borderColor: 'rgba(255, 255, 255, 0.1)', timeVisible: true }
+        });
+
+        try {
+            predictionLineSeries = predictionChart.addLineSeries({
+                color: 'rgba(167, 139, 250, 1)',
+                lineWidth: 3,
+                crosshairMarkerVisible: true,
+                lastValueVisible: true,
+                priceLineVisible: false,
+            });
+        } catch (e) {
+            console.error("Failed to add line series:", e);
+        }
+
+        // Handle resize
+        new ResizeObserver(entries => {
+            if (entries.length === 0 || entries[0].target !== container) return;
+            const newRect = entries[0].contentRect;
+            if (newRect.width > 0 && newRect.height > 0) {
+                predictionChart.applyOptions({ height: newRect.height, width: newRect.width });
+            }
+        }).observe(container);
+    }
+}
+
+async function fetchPredictionData(horizon) {
+    if (!activeSymbol || !predictionChart) return;
+    
+    try {
+        const response = await fetch(`/api/predict/${activeSymbol}?horizon=${horizon}`);
+        const data = await response.json();
+        
+        if (data.prediction && data.prediction.length > 0) {
+            predictionLineSeries.setData(data.prediction);
+            predictionChart.timeScale().fitContent();
+        }
+    } catch(err) {
+        console.error("Prediction failed:", err);
+    }
+}
+
+// Event Listeners for Prediction View
+if (openPredictionBtn) {
+    openPredictionBtn.onclick = () => showPredictionView();
+}
+
+if (predictionBackBtn) {
+    predictionBackBtn.onclick = () => {
+        predictionView.classList.add('view-hidden');
+        chartView.classList.remove('view-hidden');
+        pollMarketData(true); // Resume main chart
+    };
+}
+
+horizonBtns.forEach(btn => {
+    btn.onclick = () => {
+        horizonBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        activeHorizon = btn.getAttribute('data-horizon');
+        fetchPredictionData(activeHorizon);
+    };
+});

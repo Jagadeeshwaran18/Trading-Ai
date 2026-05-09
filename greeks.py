@@ -13,6 +13,9 @@ def black_scholes_greeks(S, K, T, r, sigma, option_type='call'):
     if T <= 0:
         return {'delta': 0, 'gamma': 0, 'theta': 0, 'vega': 0}
 
+    # Clamp sigma to prevent division by zero or negative root errors
+    sigma = max(sigma, 0.001)
+
     d1 = (math.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
     d2 = d1 - sigma * math.sqrt(T)
 
@@ -42,6 +45,9 @@ def estimate_iv(price, S, K, T, r, option_type='call'):
     """
     sigma = 0.5  # Initial guess
     for i in range(20):
+        # Ensure sigma doesn't collapse during Newton-Raphson iteration
+        sigma = max(sigma, 0.001)
+        
         g = black_scholes_greeks(S, K, T, r, sigma, option_type)
         v = g['vega'] * 100
         if v == 0: break

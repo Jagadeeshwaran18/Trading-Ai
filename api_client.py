@@ -26,8 +26,8 @@ class AlphaVantageClient:
             # Get the nearest expiration date
             expirations = ticker.options
             if not expirations:
-                return pd.DataFrame()
-            
+                return self._generate_synthetic_chain(ticker)
+                
             # Fetch calls and puts for the nearest expiry
             opt = ticker.option_chain(expirations[0])
             calls = opt.calls.copy()
@@ -58,3 +58,33 @@ class AlphaVantageClient:
             return df
         except Exception:
             return pd.DataFrame()
+
+    def _generate_synthetic_chain(self, ticker):
+        """Generates a synthetic At-The-Money options chain for assets missing real options data."""
+        try:
+            spot = ticker.fast_info['last_price']
+        except Exception:
+            return pd.DataFrame()
+            
+        import datetime
+        
+        # Calculate optimal strike (snap to nearest logical grid)
+        if spot > 1000:
+            strike = round(spot / 100) * 100
+        elif spot > 100:
+            strike = round(spot / 10) * 10
+        else:
+            strike = round(spot)
+            
+        # Simulate 7 days to expiry
+        exp_date = (datetime.datetime.now() + datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+        
+        # Simulate roughly ATM premium based on typical 20% IV
+        premium = spot * 0.015 
+        
+        simulated_data = [
+            {'strike': strike, 'lastPrice': premium, 'impliedVolatility': 0.20, 'type': 'call', 'expiration': exp_date},
+            {'strike': strike, 'lastPrice': premium, 'impliedVolatility': 0.20, 'type': 'put', 'expiration': exp_date}
+        ]
+        return pd.DataFrame(simulated_data)
+

@@ -25,6 +25,9 @@
             </div>
             <div class="status-indicator">
                 <span class="live-clock" id="liveClock">00:00:00</span>
+                <button id="openStrategyBtn" class="btn-primary" style="margin-right: 0.5rem; background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                    <i data-lucide="target"></i> Strategies
+                </button>
                 <button id="openChatBtn" class="btn-chat">
                     <i data-lucide="message-circle"></i> Chat AI
                 </button>
@@ -93,11 +96,16 @@
                         </div>
                     </div>
                 </div>
+                
+                <button id="openPredictionBtn" class="btn-primary" style="background: rgba(167,139,250,0.2); border: 1px solid #a78bfa; color: #a78bfa;">
+                    <i data-lucide="trending-up"></i> Predict Future
+                </button>
+
                 <button id="aiBtn" class="btn-ai">
                     <i data-lucide="sparkles"></i> AI Analysis
                 </button>
-                <button id="downloadBtn" class="btn-primary">
-                    <i data-lucide="download"></i> Download Excel
+                <button id="viewExcelBtn" class="btn-primary">
+                    <i data-lucide="table"></i> View Excel
                 </button>
             </div>
         </header>
@@ -145,6 +153,75 @@
         </div>
     </div>
     
+    <!-- EXCEL VIEW: Full screen excel sheet -->
+    <div id="excelView" class="view-hidden">
+        <header class="chart-header glass">
+            <div class="chart-header-left">
+                <button id="excelBackBtn" class="btn-icon">
+                    <i data-lucide="arrow-left"></i> Back
+                </button>
+                <div class="asset-info">
+                    <h2 id="excelActiveSymbol">Loading...</h2>
+                </div>
+            </div>
+
+            <div class="chart-controls">
+                <div class="filter-group">
+                    <select id="excelActionFilter" class="filter-select">
+                        <option value="ALL">All Actions</option>
+                        <option value="BUY">Buy</option>
+                        <option value="SELL">Sell</option>
+                        <option value="HOLD">Hold</option>
+                    </select>
+                    <select id="excelDateFilter" class="filter-select">
+                        <option value="ALL">All Time</option>
+                        <option value="today">Today</option>
+                        <option value="3d">Last 3 Days</option>
+                        <option value="1w">Last Week</option>
+                        <option value="1m">Last Month</option>
+                    </select>
+                </div>
+                <button id="downloadExcelBtn" class="btn-primary">
+                    <i data-lucide="download"></i> Download Excel
+                </button>
+            </div>
+        </header>
+
+        <div class="excel-table-container">
+            <table class="excel-table">
+                <thead>
+                    <tr id="excelTableHead"></tr>
+                </thead>
+                <tbody id="excelTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- STRATEGY VIEW: Full screen strategy recommendations -->
+    <div id="strategyView" class="view-hidden">
+        <header class="chart-header glass">
+            <div class="chart-header-left">
+                <button id="strategyBackBtn" class="btn-icon">
+                    <i data-lucide="arrow-left"></i> Back
+                </button>
+                <div class="asset-info">
+                    <h2>Live Strategy Recommendations</h2>
+                </div>
+            </div>
+            <div class="chart-controls">
+                <button id="refreshStrategyBtn" class="btn-primary">
+                    <i data-lucide="refresh-cw"></i> Refresh
+                </button>
+            </div>
+        </header>
+
+        <main class="strategy-main">
+            <div id="strategyGrid" class="strategy-grid">
+                <!-- Strategy cards injected here -->
+            </div>
+        </main>
+    </div>
+
     <!-- Chat AI Window -->
     <div id="chatWindow" class="chat-window hide-chat">
         <div class="chat-header">
@@ -164,6 +241,37 @@
             <button id="sendChatBtn" class="btn-send">
                 <i data-lucide="send"></i>
             </button>
+        </div>
+        </div>
+    </div>
+
+    <!-- Future Prediction View -->
+    <div id="predictionView" class="view-hidden glass-fullscreen">
+        <header class="navbar">
+            <div class="brand">
+                <i data-lucide="trending-up" class="brand-icon" style="color: #a78bfa;"></i>
+                <h1><span class="gradient-text">AI Future</span> Prediction</h1>
+                <div id="predictionActiveSymbol" class="active-badge">--</div>
+            </div>
+            <div class="nav-controls">
+                <button id="predictionBackBtn" class="btn-secondary">
+                    <i data-lucide="arrow-left"></i> Back to Chart
+                </button>
+            </div>
+        </header>
+
+        <div class="prediction-container">
+            <div class="horizon-toolbar">
+                <button class="horizon-btn" data-horizon="1m">1 Month</button>
+                <button class="horizon-btn" data-horizon="3m">3 Months</button>
+                <button class="horizon-btn" data-horizon="6m">6 Months</button>
+                <button class="horizon-btn active" data-horizon="1y">1 Year</button>
+                <button class="horizon-btn" data-horizon="5y">5 Years</button>
+                <button class="horizon-btn" data-horizon="10y">10 Years</button>
+            </div>
+            <div class="prediction-chart-wrapper">
+                <div id="predictionChartContainer"></div>
+            </div>
         </div>
     </div>
 

@@ -10,6 +10,7 @@ import asyncio
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
+import math
 import config
 from api_client import AlphaVantageClient
 from ai_engine import TradingAI
@@ -92,7 +93,8 @@ async def chat_with_ai(request: ChatRequest):
                 action = analysis_data['action']
                 conf = analysis_data['confidence']
                 rsi = analysis_data['metrics']['rsi']
-                context = f" For {symbol}, my current analysis shows a {trend} trend with a {action} signal ({conf}% confidence). The RSI is at {rsi}."
+                allocation = analysis_data.get('allocation', 'maintain current allocation')
+                context = f" For {symbol}, my current analysis shows a {trend} trend with a {action} signal ({conf}% confidence). The RSI is at {rsi}. Optimal portfolio allocation strategy: {allocation}."
             elif isinstance(analysis_data, JSONResponse):
                 # If it's a JSONResponse (likely an error), we try to extract context if it was a success masked as JSONResponse
                 pass
@@ -141,6 +143,9 @@ def get_market_data(symbol: str, range: str = "1d", interval: str = "5m"):
         if df.empty:
             return JSONResponse(content={"error": "No data found"}, status_code=404)
         
+        info = ticker.fast_info
+        previous_close = info.get("previousClose", df.iloc[0]["Close"])
+        
         # Ensure timestamp index is strictly increasing and unique (required by Lightweight Charts)
         df = df[~df.index.duplicated(keep='first')]
         df = df.sort_index()
@@ -156,8 +161,22 @@ def get_market_data(symbol: str, range: str = "1d", interval: str = "5m"):
                 "close": row["Close"],
                 "volume": row["Volume"]
             })
-        return data
+        return {"previousClose": previous_close, "data": data}
     except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
+@app.get("/api/logs/{symbol}")
+def get_symbol_logs(symbol: str):
+    """Returns the trading signals specifically for one symbol as JSON."""
+    if not os.path.exists(config.CSV_FILENAME):
+        return []
+        
+    try:
+        df = pd.read_csv(config.CSV_FILENAME).fillna("N/A")
+        symbol_df = df[df['symbol'] == symbol]
+        return symbol_df.to_dict(orient="records")[::-1]
+    except Exception as e:
+        print(f"Logs API Error: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/api/signals")
@@ -202,22 +221,25 @@ def get_ai_analysis(symbol: str):
         
         reasoning = f"The asset is currently in a {trend_desc} trend with an {rsi_desc} RSI of {signal['rsi']}. "
         
+        allocation_suggestion = ai.calculate_allocation(signal['action'], signal['confidence'], signal['rsi'], signal['trend'])
+        
         if signal['action'] == "BUY":
             reasoning += f"Our AI detects a high-probability entry point. "
             if signal['option_type'] != "SPOT":
                 reasoning += f"The {signal['option_type']} options show strong {signal['delta']} delta momentum. "
-            reasoning += f"Recommendation: BUY with {signal['confidence']}% confidence."
+            reasoning += f"Recommendation: BUY with {signal['confidence']}% confidence. Suggested Action: {allocation_suggestion}."
         elif signal['action'] == "SELL":
             reasoning += f"Price action suggests distribution. RSI is {signal['rsi']} and trend is leaning {trend_desc}. "
-            reasoning += f"Recommendation: SELL/Short with {signal['confidence']}% confidence."
+            reasoning += f"Recommendation: SELL/Short with {signal['confidence']}% confidence. Suggested Action: {allocation_suggestion}."
         else:
-            reasoning += "No extreme volatility or clear breakout pattern detected. Recommendation: HOLD until a better setup appears."
+            reasoning += f"No extreme volatility or clear breakout pattern detected. Recommendation: HOLD until a better setup appears. Suggested Action: {allocation_suggestion}."
 
         return {
             "symbol": symbol,
             "action": signal['action'],
             "confidence": signal['confidence'],
             "reasoning": reasoning,
+            "allocation": allocation_suggestion,
             "metrics": {
                 "rsi": signal['rsi'],
                 "trend": signal['trend'],
@@ -230,8 +252,59 @@ def get_ai_analysis(symbol: str):
         print(f"AI Analysis Error: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
+@app.get("/api/predict/{symbol}")
+def get_future_prediction(symbol: str, horizon: str = "1y"):
+    """Generates a probability-based future price curve."""
+    try:
+        spot_price = client.get_spot_price(symbol)
+        if not spot_price:
+            return JSONResponse(content={"error": "Failed to fetch spot price"}, status_code=500)
+            
+        hist_data = client.get_intraday_data(symbol)
+        
+        # Calculate daily drift
+        if not hist_data.empty:
+            returns = hist_data['close'].pct_change().dropna()
+            daily_drift = returns.mean()
+            if pd.isna(daily_drift): daily_drift = 0.0001
+        else:
+            daily_drift = 0.0002  # Positive default bias
+
+        # Map horizon to days
+        horizon_days = 365
+        if horizon == "1m": horizon_days = 30
+        elif horizon == "3m": horizon_days = 90
+        elif horizon == "6m": horizon_days = 180
+        elif horizon == "1y": horizon_days = 365
+        elif horizon == "5y": horizon_days = 365 * 5
+        elif horizon == "10y": horizon_days = 365 * 10
+
+        points = []
+        now = datetime.now()
+        
+        # Dynamic stepping to prevent massive payloads for 10 years
+        step_days = 1
+        if horizon_days >= 365 * 5: 
+            step_days = 7
+        
+        for d in range(1, horizon_days + 1, step_days):
+            t_years = d / 365.0
+            # Expected value path using annualized drift
+            expected_price = spot_price * math.exp((daily_drift * 252) * t_years)
+            
+            future_date = now + timedelta(days=d)
+            points.append({
+                "time": int(future_date.timestamp()),
+                "value": round(expected_price, 2)
+            })
+
+        return {"symbol": symbol, "horizon": horizon, "prediction": points}
+    except Exception as e:
+        print(f"Prediction Error: {e}")
+        return JSONResponse(content={"error": str(e)}, status_code=500)
+
 @app.get("/api/download/{symbol}")
-def download_symbol_logs(symbol: str):
+def download_symbol_logs(symbol: str, action: Optional[str] = None, date_range: Optional[str] = None):
     """Download the signals Excel file specifically for one symbol."""
     if not os.path.exists(config.CSV_FILENAME):
         return JSONResponse(content={"error": "Log file not found"}, status_code=404)
@@ -245,6 +318,34 @@ def download_symbol_logs(symbol: str):
         
         if symbol_df.empty:
             return JSONResponse(content={"error": f"No data found for {symbol}"}, status_code=404)
+        
+        # Apply Filters
+        if action and action != "ALL":
+            symbol_df = symbol_df[symbol_df['action'] == action]
+            
+        if date_range and date_range != "ALL":
+            # Convert timestamp to datetime for accurate filtering
+            symbol_df['timestamp'] = pd.to_datetime(symbol_df['timestamp'])
+            now = datetime.now()
+            
+            start_date = None
+            if date_range == "today":
+                start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            elif date_range == "3d":
+                start_date = now - timedelta(days=3)
+            elif date_range == "1w":
+                start_date = now - timedelta(weeks=1)
+            elif date_range == "1m":
+                start_date = now - timedelta(days=30)
+                
+            if start_date:
+                symbol_df = symbol_df[symbol_df['timestamp'] >= start_date]
+            
+            # Revert back to string format for cleaner Excel output
+            symbol_df['timestamp'] = symbol_df['timestamp'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+        if symbol_df.empty:
+            return JSONResponse(content={"error": "No data matches the selected filters."}, status_code=404)
         
         # Write to in-memory bytes buffer as Excel using openpyxl
         buffer = io.BytesIO()

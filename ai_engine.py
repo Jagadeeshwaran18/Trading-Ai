@@ -143,3 +143,40 @@ class TradingAI:
             return [best_signal]
             
         return signals
+
+    def calculate_allocation(self, action, confidence, rsi, trend):
+        """
+        Dynamic investment recommendation logic based on real-time technical indicators.
+        Suggests optimal portfolio allocations.
+        """
+        if action == "BUY":
+            base_alloc = 10
+            if rsi < 30:
+                base_alloc += 10 # Heavily oversold, increase allocation
+            elif rsi < 40:
+                base_alloc += 5
+            
+            if trend == "BULLISH":
+                base_alloc += 5 # Trend confirmation
+                
+            conf_bonus = int(confidence / 10)
+            total_alloc = min(40, base_alloc + conf_bonus)
+            return f"invest {total_alloc}% now"
+            
+        elif action == "SELL":
+            base_alloc = 10
+            if rsi > 70:
+                base_alloc += 10 # Heavily overbought, reduce allocation more
+            elif rsi > 60:
+                base_alloc += 5
+                
+            if trend == "BEARISH":
+                base_alloc += 5 # Trend confirmation
+                
+            conf_bonus = int(confidence / 10)
+            total_alloc = min(40, base_alloc + conf_bonus)
+            return f"reduce by {total_alloc}%"
+            
+        else:
+            return "maintain current allocation"
+
