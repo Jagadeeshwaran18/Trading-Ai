@@ -95,22 +95,22 @@
                                 data-speed="10000">1M</a>
                         </div>
                     </div>
-                </div>
-                
-                <button id="openPredictionBtn" class="btn-primary" style="background: rgba(167,139,250,0.2); border: 1px solid #a78bfa; color: #a78bfa;">
-                    <i data-lucide="trending-up"></i> Predict Future
-                </button>
+                    
+                    <button id="openPredictionBtn" class="btn-primary" style="background: rgba(167,139,250,0.2); border: 1px solid #a78bfa; color: #a78bfa;">
+                        <i data-lucide="trending-up"></i> Predict Future
+                    </button>
 
-                <button id="aiBtn" class="btn-ai">
-                    <i data-lucide="sparkles"></i> AI Analysis
-                </button>
-                <button id="viewExcelBtn" class="btn-primary">
-                    <i data-lucide="table"></i> View Excel
-                </button>
+                    <button id="aiBtn" class="btn-ai">
+                        <i data-lucide="sparkles"></i> AI Analysis
+                    </button>
+                    <button id="viewExcelBtn" class="btn-primary">
+                        <i data-lucide="table"></i> View Excel
+                    </button>
+                </div>
             </div>
         </header>
 
-        <div class="fullscreen-chart-wrapper">
+        <div class="fullscreen-chart-wrapper" style="position: relative;">
             <div id="chartContainer"></div>
 
             <!-- AI Side Panel -->
@@ -138,6 +138,10 @@
                             <label>Trend</label>
                             <span id="aiMetricTrend">--</span>
                         </div>
+                        <div class="metric-item" style="grid-column: span 2;">
+                            <label>Session PnL</label>
+                            <span id="aiMetricPnL" class="pnl-badge">--</span>
+                        </div>
                     </div>
 
                     <div class="ai-reasoning-box">
@@ -162,6 +166,7 @@
                 </button>
                 <div class="asset-info">
                     <h2 id="excelActiveSymbol">Loading...</h2>
+                    <span id="excelTotalPnL" class="pnl-badge" style="font-size: 1.1rem; padding: 0.4rem 1rem;">--</span>
                 </div>
             </div>
 
@@ -261,6 +266,26 @@
         </header>
 
         <div class="prediction-container">
+            <!-- New Stats Row -->
+            <div class="prediction-stats-grid">
+                <div class="stat-card glass">
+                    <label>Starting Price</label>
+                    <span id="statSpotPrice">--</span>
+                </div>
+                <div class="stat-card glass">
+                    <label>Expected Return</label>
+                    <span id="statExpectedReturn" class="bullish">--</span>
+                </div>
+                <div class="stat-card glass">
+                    <label>Annual Drift</label>
+                    <span id="statDrift">--</span>
+                </div>
+                <div class="stat-card glass">
+                    <label>Projected Price</label>
+                    <span id="statTargetPrice">--</span>
+                </div>
+            </div>
+
             <div class="horizon-toolbar">
                 <button class="horizon-btn" data-horizon="1m">1 Month</button>
                 <button class="horizon-btn" data-horizon="3m">3 Months</button>
@@ -269,13 +294,27 @@
                 <button class="horizon-btn" data-horizon="5y">5 Years</button>
                 <button class="horizon-btn" data-horizon="10y">10 Years</button>
             </div>
+
             <div class="prediction-chart-wrapper">
                 <div id="predictionChartContainer"></div>
+                
+                <!-- Loading Overlay -->
+                <div id="predictionLoading" class="prediction-overlay">
+                    <div class="spinner"></div>
+                    <p>Simulating market outcomes...</p>
+                </div>
+
+                <!-- Error Overlay -->
+                <div id="predictionError" class="prediction-overlay view-hidden">
+                    <i data-lucide="alert-triangle" class="error-icon"></i>
+                    <p id="predictionErrorText">Failed to generate prediction.</p>
+                    <button id="predictionRetryBtn" class="btn-primary">Retry Analysis</button>
+                </div>
             </div>
         </div>
     </div>
 
-    <script src="app_view.js?v=15"></script>
+    <script src="app_view.js?v=20"></script>
 </body>
 
 </html>

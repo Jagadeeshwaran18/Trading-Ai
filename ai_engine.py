@@ -15,6 +15,29 @@ class TradingAI:
         rs = gain / loss
         return 100 - (100 / (1 + rs))
 
+    def _get_targets(self, spot_price, action):
+        if action == "BUY":
+            return {
+                "stop_loss": round(spot_price * 0.99, 2),
+                "target": round(spot_price * 1.02, 2),
+                "trailing_stoploss": round(spot_price * 0.995, 2),
+                "trailing_target": round(spot_price * 1.03, 2)
+            }
+        elif action == "SELL":
+            return {
+                "stop_loss": round(spot_price * 1.01, 2),
+                "target": round(spot_price * 0.98, 2),
+                "trailing_stoploss": round(spot_price * 1.005, 2),
+                "trailing_target": round(spot_price * 0.97, 2)
+            }
+        else:
+            return {
+                "stop_loss": round(spot_price, 2),
+                "target": round(spot_price, 2),
+                "trailing_stoploss": round(spot_price, 2),
+                "trailing_target": round(spot_price, 2)
+            }
+
     def generate_signals(self, symbol, spot_price, options_chain, historical_data):
         """
         Analyzes options and market context to generate signals.
@@ -54,6 +77,7 @@ class TradingAI:
                 spot_action = "BUY"
                 spot_confidence = 80
 
+            targets = self._get_targets(spot_price, spot_action)
             signals.append({
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "symbol": symbol,
@@ -68,7 +92,11 @@ class TradingAI:
                 "rsi": round(latest_rsi, 2),
                 "trend": trend,
                 "action": spot_action,
-                "confidence": round(spot_confidence, 1)
+                "confidence": round(spot_confidence, 1),
+                "stop_loss": targets["stop_loss"],
+                "target": targets["target"],
+                "trailing_stoploss": targets["trailing_stoploss"],
+                "trailing_target": targets["trailing_target"]
             })
             return signals
 
@@ -120,6 +148,7 @@ class TradingAI:
                     signal_type = "SELL"
 
             # Always add to log so the user can see everything in Excel
+            targets = self._get_targets(spot_price, signal_type)
             signals.append({
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "symbol": symbol,
@@ -134,7 +163,11 @@ class TradingAI:
                 "rsi": round(latest_rsi, 2),
                 "trend": trend,
                 "action": signal_type,
-                "confidence": round(confidence, 1)
+                "confidence": round(confidence, 1),
+                "stop_loss": targets["stop_loss"],
+                "target": targets["target"],
+                "trailing_stoploss": targets["trailing_stoploss"],
+                "trailing_target": targets["trailing_target"]
             })
 
         # Return only the single best signal to keep logs clean

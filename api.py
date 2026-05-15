@@ -19,6 +19,9 @@ import time
 import threading
 from contextlib import asynccontextmanager
 
+def get_display_name(symbol):
+    return config.SYMBOL_MAP.get(symbol, symbol)
+
 def trading_loop():
     """Background task that runs the trading analysis loop in a dedicated thread."""
     time.sleep(2)  # Give the web server 2 seconds to boot before heavily fetching data
@@ -94,7 +97,8 @@ async def chat_with_ai(request: ChatRequest):
                 conf = analysis_data['confidence']
                 rsi = analysis_data['metrics']['rsi']
                 allocation = analysis_data.get('allocation', 'maintain current allocation')
-                context = f" For {symbol}, my current analysis shows a {trend} trend with a {action} signal ({conf}% confidence). The RSI is at {rsi}. Optimal portfolio allocation strategy: {allocation}."
+                display_name = get_display_name(symbol)
+                context = f" For {display_name}, my current analysis shows a {trend} trend with a {action} signal ({conf}% confidence). The RSI is at {rsi}. Optimal portfolio allocation strategy: {allocation}."
             elif isinstance(analysis_data, JSONResponse):
                 # If it's a JSONResponse (likely an error), we try to extract context if it was a success masked as JSONResponse
                 pass
@@ -119,18 +123,21 @@ async def chat_with_ai(request: ChatRequest):
 
     if any(word in msg for word in ["buy", "sell", "trade", "signal", "call", "put"]):
         if context:
+            display_name = get_display_name(symbol)
             advice = "I recommend a strong BUY" if analysis_data and analysis_data['action'] == "BUY" else ("I suggest SELLING" if analysis_data and analysis_data['action'] == "SELL" else "I recommend HOLDING for now")
-            return {"response": f"Based on my algorithmic evaluation of {symbol}, {advice}.{context} Please always use stop-losses to manage your risk."}
+            return {"response": f"Based on my algorithmic evaluation of {display_name}, {advice}.{context} Please always use stop-losses to manage your risk."}
         return {"response": "I provide real-time signals for all assets in your watchlist. Select an asset like '^NSEI' or 'BTC-USD' to see my specific AI recommendation and reasoning."}
 
     if "price" in msg or "how much" in msg:
         if context:
-            return {"response": f"The current analysis for {symbol} indicates a price level consistent with its {analysis_data['metrics']['trend'] if analysis_data else 'current'} trend.{context}"}
+            display_name = get_display_name(symbol)
+            return {"response": f"The current analysis for {display_name} indicates a price level consistent with its {analysis_data['metrics']['trend'] if analysis_data else 'current'} trend.{context}"}
         return {"response": "I track real-time prices for major indices and crypto. Which specific asset are you interested in?"}
 
     # 5. Fallback sophisticated response
     if symbol:
-        return {"response": f"I see you're interested in {symbol}.{context} Is there something specific about its indicators or potential breakout you'd like to know?"}
+        display_name = get_display_name(symbol)
+        return {"response": f"I see you're interested in {display_name}.{context} Is there something specific about its indicators or potential breakout you'd like to know?"}
     
     return {"response": "That's a great question. As a trading AI, I monitor volatility, volume, and technical indicators. Could you specify which asset or trading concept you'd like me to explain?"}
 
@@ -161,7 +168,17 @@ def get_market_data(symbol: str, range: str = "1d", interval: str = "5m"):
                 "close": row["Close"],
                 "volume": row["Volume"]
             })
-        return {"previousClose": previous_close, "data": data}
+            
+        # Get live current price and change to match watchlist exactly
+        current_price = info.get("lastPrice", df.iloc[-1]["Close"])
+        daily_change = (current_price - previous_close) / previous_close if previous_close else 0
+
+        return {
+            "previousClose": previous_close, 
+            "currentPrice": current_price,
+            "dailyChange": daily_change,
+            "data": data
+        }
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
@@ -298,7 +315,20 @@ def get_future_prediction(symbol: str, horizon: str = "1y"):
                 "value": round(expected_price, 2)
             })
 
-        return {"symbol": symbol, "horizon": horizon, "prediction": points}
+        # Calculate final expected return for the stats panel
+        final_price = points[-1]["value"]
+        total_return = ((final_price - spot_price) / spot_price) * 100
+
+        return {
+            "symbol": symbol, 
+            "horizon": horizon, 
+            "prediction": points,
+            "metrics": {
+                "expected_return": round(total_return, 2),
+                "annual_drift": round(daily_drift * 252 * 100, 2),
+                "spot_price": round(spot_price, 2)
+            }
+        }
     except Exception as e:
         print(f"Prediction Error: {e}")
         return JSONResponse(content={"error": str(e)}, status_code=500)

@@ -6,6 +6,13 @@ BASE_URL = "https://www.alphavantage.co/query"
 
 # Trading Parameters
 WATCHLIST = ["SPY", "^NSEI", "^NSEBANK", "BTC-USD", "ETH-USD"]  # Stocks, Indices, and Crypto
+SYMBOL_MAP = {
+    "SPY": "S&P 500 ETF",
+    "^NSEI": "NIFTY 50",
+    "^NSEBANK": "BANKNIFTY",
+    "BTC-USD": "BITCOIN",
+    "ETH-USD": "ETHEREUM"
+}
 INTERVAL_MINUTES = 3
 RISK_FREE_RATE = 0.05  # Approximate risk-free rate (5%)
 

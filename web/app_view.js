@@ -1,6 +1,19 @@
 // Initialize Lucide Icons
 lucide.createIcons();
 
+// Symbol Full Names Mapping
+const SYMBOL_NAMES = {
+    "SPY": "S&P 500 ETF",
+    "^NSEI": "NIFTY 50",
+    "^NSEBANK": "BANKNIFTY",
+    "BTC-USD": "BITCOIN",
+    "ETH-USD": "ETHEREUM"
+};
+
+function getDisplayName(symbol) {
+    return SYMBOL_NAMES[symbol] || symbol;
+}
+
 // DOM Elements
 const homeView = document.getElementById('homeView');
 const chartView = document.getElementById('chartView');
@@ -41,6 +54,11 @@ let activeInterval = "1m";
 let liveTickSpeed = 10000;
 let chart = null;
 let candleSeries = null;
+let emaSeries = null;
+
+let aiMarkers = [];
+let manualMarkers = [];
+let lastCandleData = [];
 let activeExcelData = [];
 
 // Prediction State
@@ -156,6 +174,16 @@ function initChart() {
             wickDownColor: '#ef4444',
         });
 
+        // Add EMA/SMA line series
+        const lineSeriesType = LightweightCharts.LineSeries;
+        emaSeries = chart.addSeries(lineSeriesType, {
+            color: 'rgba(56, 189, 248, 0.7)',
+            lineWidth: 2,
+            crosshairMarkerVisible: false,
+            priceLineVisible: false,
+            lastValueVisible: false,
+        });
+
         // Handle Resize
         const resizeObserver = new ResizeObserver(entries => {
             if (entries.length === 0 || !entries[0].contentRect) return;
@@ -190,12 +218,15 @@ async function fetchWatchlist() {
             const changeColor = isBullish ? 'var(--bullish)' : 'var(--bearish)';
             const changeSign = isBullish ? '+' : '';
 
+            const displayName = getDisplayName(item.symbol);
+
             const card = document.createElement('div');
             card.className = 'tracker-card glass';
             card.onclick = () => showChartView(item.symbol);
             card.innerHTML = `
                 <div class="tracker-top">
-                    <span class="tracker-symbol">${item.symbol}</span>
+                    <span class="tracker-symbol">${displayName}</span>
+                    <span class="tracker-ticker" style="font-size: 0.7rem; opacity: 0.6; display: block; margin-top: -4px;">${item.symbol}</span>
                 </div>
                 <div class="tracker-bottom">
                     <span class="tracker-price">$${item.price.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
@@ -243,25 +274,43 @@ async function fetchMarketData(fitContent = false) {
             // Update the chart with the real data from the server
             // This ensures we show proper candles forming instead of flat lines
             candleSeries.setData(data);
+            lastCandleData = data;
+            
+            if (emaSeries && data.length > 0) {
+                // Calculate 14-period SMA
+                const period = 14;
+                const smaData = [];
+                for (let i = 0; i < data.length; i++) {
+                    if (i < period - 1) continue;
+                    let sum = 0;
+                    for (let j = 0; j < period; j++) {
+                        sum += data[i - j].close;
+                    }
+                    smaData.push({ time: data[i].time, value: sum / period });
+                }
+                emaSeries.setData(smaData);
+            }
+
             if (fitContent) {
                 chart.timeScale().fitContent();
             }
 
-            // Update Header
-            const lastPrice = data[data.length - 1].close;
-            // Use true previous close for 1D range to match home view, otherwise use the first candle of the range
-            const prevPrice = activeRange === "1d" ? prevDayClose : data[0].close;
-            const change = ((lastPrice - prevPrice) / prevPrice * 100).toFixed(2);
+            // Update Header with exact live data from API (matches watchlist)
+            const livePrice = rawData.currentPrice;
+            const liveChange = rawData.dailyChange * 100;
 
-            activeSymbolEl.innerText = activeSymbol;
-            activePriceEl.innerText = `$${lastPrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+            activeSymbolEl.innerText = getDisplayName(activeSymbol);
+            activePriceEl.innerText = `$${livePrice.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
-            // Format Change percent
-            const isBullish = change > 0;
+            // Format Change percent (Always show 1D change to match dashboard)
+            const isBullish = liveChange >= 0;
             const changeColor = isBullish ? 'var(--bullish)' : 'var(--bearish)';
             const changeSign = isBullish ? '+' : '';
-            activeChangeEl.innerText = `${changeSign}${change}% (${activeRange.toUpperCase()})`;
+            activeChangeEl.innerText = `${changeSign}${liveChange.toFixed(2)}% (1D)`;
             activeChangeEl.style.color = changeColor;
+
+            // Plot markers from logs
+            await fetchAndPlotSignals();
         } else {
             throw new Error("Server returned an empty dataset for this timeframe.");
         }
@@ -276,6 +325,154 @@ async function fetchMarketData(fitContent = false) {
         }
     }
 }
+
+/**
+ * Fetch and Plot Excel Signal Logs as Markers
+ */
+async function fetchAndPlotSignals() {
+    if (!activeSymbol || !candleSeries || !lastCandleData || lastCandleData.length === 0) {
+        console.warn("fetchAndPlotSignals: Missing dependencies or data");
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/logs/${activeSymbol}`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const logs = await response.json();
+        
+        updatePnLDisplay(logs);
+        
+        const markers = [];
+        
+        // 1. Process real signals from logs
+        if (logs && Array.isArray(logs)) {
+            for (const log of logs) {
+                if (log.action === "BUY" || log.action === "SELL") {
+                    // Robust timestamp parsing
+                    const ts = String(log.timestamp).replace(' ', 'T');
+                    const logTime = Math.floor(new Date(ts).getTime() / 1000);
+                    
+                    if (isNaN(logTime)) continue;
+
+                    // Find the closest candle in time
+                    let closest = null;
+                    let minDiff = Infinity;
+                    
+                    for (const candle of lastCandleData) {
+                        const diff = Math.abs(candle.time - logTime);
+                        if (diff < minDiff) {
+                            minDiff = diff;
+                            closest = candle;
+                        }
+                    }
+
+                    // Only plot if we found a candle within a reasonable range (relax to 5 days = 432000s for timezone differences)
+                    if (closest && minDiff < 432000) {
+                        // Determine Label (e.g., BUY CALL, BUY PUT, or just BUY)
+                        let markerLabel = log.action;
+                        if (log.option_type && log.option_type !== "SPOT") {
+                            markerLabel += " " + log.option_type;
+                        }
+
+                        markers.push({
+                            time: closest.time,
+                            position: log.action === "BUY" ? 'belowBar' : 'aboveBar',
+                            color: log.action === "BUY" ? '#10b981' : '#ef4444',
+                            shape: log.action === "BUY" ? 'arrowUp' : 'arrowDown',
+                            text: markerLabel,
+                            size: 2
+                        });
+                    }
+                }
+            }
+        }
+
+        // 2. Add a TEST marker to verify that the marker engine is actually working
+        // This will appear on the 5th candle from the start
+        if (lastCandleData.length > 5) {
+            markers.push({
+                time: lastCandleData[5].time,
+                position: 'belowBar',
+                color: '#facc15',
+                shape: 'arrowUp',
+                text: 'SYSTEM ACTIVE',
+            });
+        }
+
+        // 3. Sort markers by time (required by library)
+        markers.sort((a, b) => a.time - b.time);
+
+        // Update global AI markers
+        aiMarkers = markers;
+        
+        applyAllMarkers();
+        
+        
+    } catch (err) {
+        console.error("fetchAndPlotSignals error:", err);
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Manual Markers & Plotting Engine
+// ---------------------------------------------------------------------------------------------------------------------
+
+function applyAllMarkers() {
+    if (!candleSeries) return;
+    
+    // Merge ai and manual markers, sort by time ascending
+    let allMarkers = [...aiMarkers, ...manualMarkers];
+    allMarkers.sort((a, b) => a.time - b.time);
+    
+    // Deduplicate (strictly 1 marker per candle time)
+    const finalMarkers = [];
+    const seenTimes = new Set();
+    for (let i = allMarkers.length - 1; i >= 0; i--) {
+        const m = allMarkers[i];
+        if (!seenTimes.has(m.time)) {
+            finalMarkers.push(m);
+            seenTimes.add(m.time);
+        }
+    }
+    finalMarkers.reverse(); // Restore ascending chronological order
+
+    console.log(`Setting ${finalMarkers.length} total markers on chart (AI: ${aiMarkers.length}, Manual: ${manualMarkers.length})`);
+    
+    try {
+        if (typeof candleSeries.setMarkers === 'function') {
+            candleSeries.setMarkers(finalMarkers);
+        } else if (LightweightCharts.createSeriesMarkers) {
+            if (!window.chartMarkersPlugin) {
+                window.chartMarkersPlugin = LightweightCharts.createSeriesMarkers(candleSeries, finalMarkers);
+            } else if (typeof window.chartMarkersPlugin.setMarkers === 'function') {
+                window.chartMarkersPlugin.setMarkers(finalMarkers);
+            }
+        }
+    } catch(err) {
+        console.error("Error setting markers", err);
+    }
+}
+
+window.addManualMarker = function(type) {
+    if (!lastCandleData || !lastCandleData.time) {
+        alert("Wait for market data to load before placing manual markers.");
+        return;
+    }
+    
+    const isBuy = type === 'BUY';
+    const marker = {
+        time: lastCandleData.time,
+        position: isBuy ? 'belowBar' : 'aboveBar',
+        color: isBuy ? '#22c55e' : '#ef4444',
+        shape: isBuy ? 'arrowUp' : 'arrowDown',
+        text: type,
+        size: 2
+    };
+    
+    manualMarkers.push(marker);
+    applyAllMarkers();
+    console.log(`Manual ${type} marker added at ${new Date(lastCandleData.time * 1000).toLocaleTimeString()}`);
+};
 
 /**
  * Polling Loops
@@ -298,6 +495,8 @@ function pollMarketData(fitContent = false) {
  * Event Listeners
  */
 backBtn.onclick = () => showHomeView();
+
+// Removed manual buttons logic
 
 // Global Dropdown Toggle Logic
 document.querySelectorAll('.dropdown').forEach(dropdown => {
@@ -421,7 +620,7 @@ if (viewExcelBtn) {
         // Hide chart view and show excel view
         chartView.classList.add('view-hidden');
         excelView.classList.remove('view-hidden');
-        excelActiveSymbol.innerText = activeSymbol + " Data Logs";
+        excelActiveSymbol.innerText = getDisplayName(activeSymbol) + " Data Logs";
         excelTableHead.innerHTML = '<th>Loading...</th>';
         excelTableBody.innerHTML = '';
         
@@ -431,6 +630,7 @@ if (viewExcelBtn) {
             
             if (data && data.length > 0) {
                 activeExcelData = data;
+                updatePnLDisplay(data);
                 // Generate headers dynamically from the first row
                 const headers = Object.keys(data[0]);
                 excelTableHead.innerHTML = headers.map(h => `<th>${h.charAt(0).toUpperCase() + h.slice(1)}</th>`).join('');
@@ -508,6 +708,73 @@ function renderFilteredExcelTable() {
 
 if (excelActionFilter) excelActionFilter.onchange = renderFilteredExcelTable;
 if (excelDateFilter) excelDateFilter.onchange = renderFilteredExcelTable;
+
+/**
+ * Profit and Loss Calculation
+ */
+function updatePnLDisplay(logs) {
+    if (!logs || !Array.isArray(logs) || logs.length === 0) {
+        setPnLText(0);
+        return;
+    }
+
+    let totalPnL = 0;
+    let entryPrice = null;
+    let position = null;
+
+    // Logs are typically newest first, so we sort chronologically (oldest first)
+    const sortedLogs = [...logs].sort((a, b) => new Date(a.timestamp.replace(' ', 'T')).getTime() - new Date(b.timestamp.replace(' ', 'T')).getTime());
+
+    for (const log of sortedLogs) {
+        const price = parseFloat(log.spot);
+        if (isNaN(price)) continue;
+
+        if (log.action === 'BUY') {
+            if (position === 'SELL') {
+                const tradePnL = ((entryPrice - price) / entryPrice) * 100;
+                totalPnL += tradePnL;
+                position = null;
+                entryPrice = null;
+            } else if (!position) {
+                position = 'BUY';
+                entryPrice = price;
+            }
+        } else if (log.action === 'SELL') {
+            if (position === 'BUY') {
+                const tradePnL = ((price - entryPrice) / entryPrice) * 100;
+                totalPnL += tradePnL;
+                position = null;
+                entryPrice = null;
+            } else if (!position) {
+                position = 'SELL';
+                entryPrice = price;
+            }
+        }
+    }
+
+    // Add unrealized PnL if there is an open position and we have a current spot price
+    // But since logs just contain executed signals, we'll only do realized PnL for now.
+
+    setPnLText(totalPnL);
+}
+
+function setPnLText(pnlValue) {
+    const formatted = pnlValue.toFixed(2) + '%';
+    const sign = pnlValue > 0 ? '+' : '';
+    const text = sign + formatted;
+    
+    const excelPnL = document.getElementById('excelTotalPnL');
+    if (excelPnL) {
+        excelPnL.innerText = 'Total PnL: ' + text;
+        excelPnL.className = 'pnl-badge ' + (pnlValue > 0 ? 'pnl-positive' : (pnlValue < 0 ? 'pnl-negative' : ''));
+    }
+
+    const sessionPnL = document.getElementById('aiMetricPnL');
+    if (sessionPnL) {
+        sessionPnL.innerText = text;
+        sessionPnL.className = 'pnl-badge ' + (pnlValue > 0 ? 'pnl-positive' : (pnlValue < 0 ? 'pnl-negative' : ''));
+    }
+}
 
 /**
  * Strategy Recommendations Logic
@@ -742,7 +1009,7 @@ startClock();
  * Future Prediction Logic (Dedicated View)
  */
 function showPredictionView() {
-    if (!activeSymbol) return; // Must have an active symbol selected
+    if (!activeSymbol) return;
     
     chartView.classList.add('view-hidden');
     excelView.classList.add('view-hidden');
@@ -750,9 +1017,9 @@ function showPredictionView() {
     homeView.classList.add('view-hidden');
     predictionView.classList.remove('view-hidden');
     
-    predictionActiveSymbol.innerText = activeSymbol;
+    predictionActiveSymbol.innerText = getDisplayName(activeSymbol);
     
-    // Stop all background polling/charts from main view
+    // Stop all background polling/charts
     if (watchlistTimer) clearTimeout(watchlistTimer);
     if (marketDataTimer) clearTimeout(marketDataTimer);
     
@@ -762,57 +1029,97 @@ function showPredictionView() {
 
 function initPredictionChart() {
     const container = document.getElementById('predictionChartContainer');
+    if (!container) return;
+
+    // Use fallback dimensions if the container isn't fully painted yet
+    const width = container.clientWidth || window.innerWidth - 64;
+    const height = container.clientHeight || 500;
+
     if (!predictionChart) {
-        // Ensure container has dimensions, or fallback to window dimensions
-        const cWidth = container.clientWidth > 0 ? container.clientWidth : window.innerWidth - 64;
-        const cHeight = container.clientHeight > 0 ? container.clientHeight : window.innerHeight - 200;
-
-        predictionChart = LightweightCharts.createChart(container, {
-            width: cWidth,
-            height: cHeight,
-            layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#94a3b8' },
-            grid: { vertLines: { color: 'rgba(255, 255, 255, 0.05)' }, horzLines: { color: 'rgba(255, 255, 255, 0.05)' } },
-            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-            rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.1)' },
-            timeScale: { borderColor: 'rgba(255, 255, 255, 0.1)', timeVisible: true }
-        });
-
         try {
-            predictionLineSeries = predictionChart.addLineSeries({
-                color: 'rgba(167, 139, 250, 1)',
+            predictionChart = LightweightCharts.createChart(container, {
+                width: width,
+                height: height,
+                layout: { background: { type: 'solid', color: 'transparent' }, textColor: '#94a3b8' },
+                grid: { vertLines: { color: 'rgba(255, 255, 255, 0.05)' }, horzLines: { color: 'rgba(255, 255, 255, 0.05)' } },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+                rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.1)' },
+                timeScale: { borderColor: 'rgba(255, 255, 255, 0.1)', timeVisible: true }
+            });
+
+            const lineSeriesType = LightweightCharts.LineSeries || LightweightCharts.AreaSeries; // Fallback to Area if Line is missing for some reason
+            predictionLineSeries = predictionChart.addSeries(lineSeriesType, {
+                color: '#a78bfa',
                 lineWidth: 3,
                 crosshairMarkerVisible: true,
                 lastValueVisible: true,
                 priceLineVisible: false,
             });
-        } catch (e) {
-            console.error("Failed to add line series:", e);
-        }
 
-        // Handle resize
-        new ResizeObserver(entries => {
-            if (entries.length === 0 || entries[0].target !== container) return;
-            const newRect = entries[0].contentRect;
-            if (newRect.width > 0 && newRect.height > 0) {
-                predictionChart.applyOptions({ height: newRect.height, width: newRect.width });
-            }
-        }).observe(container);
+            new ResizeObserver(entries => {
+                if (entries.length > 0 && predictionChart) {
+                    const { width, height } = entries[0].contentRect;
+                    if (width > 0 && height > 0) {
+                        predictionChart.applyOptions({ width, height });
+                    }
+                }
+            }).observe(container);
+        } catch (e) {
+            console.error("Critical error creating prediction chart:", e);
+        }
     }
 }
 
 async function fetchPredictionData(horizon) {
-    if (!activeSymbol || !predictionChart) return;
+    if (!activeSymbol) return;
     
+    // Ensure chart is initialized
+    if (!predictionChart || !predictionLineSeries) {
+        initPredictionChart();
+    }
+    
+    if (!predictionLineSeries) {
+        console.error("Prediction chart initialization failed.");
+        return;
+    }
+
+    const loadingOverlay = document.getElementById('predictionLoading');
+    const errorOverlay = document.getElementById('predictionError');
+    const errorText = document.getElementById('predictionErrorText');
+
+    // Show loading, hide error
+    loadingOverlay.classList.remove('view-hidden');
+    errorOverlay.classList.add('view-hidden');
+
     try {
         const response = await fetch(`/api/predict/${activeSymbol}?horizon=${horizon}`);
         const data = await response.json();
         
+        if (data.error) throw new Error(data.error);
+
         if (data.prediction && data.prediction.length > 0) {
             predictionLineSeries.setData(data.prediction);
             predictionChart.timeScale().fitContent();
+
+            // Update Stats
+            if (data.metrics) {
+                document.getElementById('statSpotPrice').innerText = `$${data.metrics.spot_price.toLocaleString()}`;
+                document.getElementById('statDrift').innerText = `${data.metrics.annual_drift}%`;
+                
+                const returnEl = document.getElementById('statExpectedReturn');
+                returnEl.innerText = `${data.metrics.expected_return > 0 ? '+' : ''}${data.metrics.expected_return}%`;
+                returnEl.className = data.metrics.expected_return > 0 ? 'bullish' : 'bearish';
+
+                const targetPrice = data.prediction[data.prediction.length - 1].value;
+                document.getElementById('statTargetPrice').innerText = `$${targetPrice.toLocaleString()}`;
+            }
         }
     } catch(err) {
         console.error("Prediction failed:", err);
+        errorText.innerText = `Prediction Error: ${err.message}`;
+        errorOverlay.classList.remove('view-hidden');
+    } finally {
+        loadingOverlay.classList.add('view-hidden');
     }
 }
 
@@ -825,8 +1132,13 @@ if (predictionBackBtn) {
     predictionBackBtn.onclick = () => {
         predictionView.classList.add('view-hidden');
         chartView.classList.remove('view-hidden');
-        pollMarketData(true); // Resume main chart
+        pollMarketData(true);
     };
+}
+
+const retryBtn = document.getElementById('predictionRetryBtn');
+if (retryBtn) {
+    retryBtn.onclick = () => fetchPredictionData(activeHorizon);
 }
 
 horizonBtns.forEach(btn => {
