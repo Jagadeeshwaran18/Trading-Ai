@@ -30,6 +30,7 @@ const excelActiveSymbol = document.getElementById('excelActiveSymbol');
 const excelTableHead = document.getElementById('excelTableHead');
 const excelTableBody = document.getElementById('excelTableBody');
 const timeframes = document.querySelectorAll('.timeframe');
+const fvgBtn = document.getElementById('fvgBtn');
 
 // Strategy DOM Elements
 const strategyView = document.getElementById('strategyView');
@@ -61,6 +62,10 @@ let manualMarkers = [];
 let lastCandleData = [];
 let activeExcelData = [];
 
+let fvgEnabled = false;
+let activeFvgData = [];
+let fvgSeriesList = [];
+
 // Prediction State
 let predictionChart = null;
 let predictionLineSeries = null;
@@ -83,6 +88,9 @@ function showHomeView() {
     // Stop market polling
     if (marketDataTimer) clearTimeout(marketDataTimer);
     activeSymbol = null;
+
+    // Clear FVG series when returning home
+    clearFvgSeries();
 
     // Resume watchlist polling if paused
     pollWatchlist();
@@ -265,6 +273,7 @@ async function fetchMarketData(fitContent = false) {
 
         const data = rawData.data;
         const prevDayClose = rawData.previousClose;
+        activeFvgData = rawData.fvg || [];
 
         if (data && data.length > 0) {
             if (data[0].time === undefined || data[0].close === undefined) {
@@ -311,6 +320,11 @@ async function fetchMarketData(fitContent = false) {
 
             // Plot markers from logs
             await fetchAndPlotSignals();
+
+            // Render FVG if enabled
+            if (fvgEnabled) {
+                drawFvgSeries(activeFvgData);
+            }
         } else {
             throw new Error("Server returned an empty dataset for this timeframe.");
         }
@@ -1149,3 +1163,85 @@ horizonBtns.forEach(btn => {
         fetchPredictionData(activeHorizon);
     };
 });
+
+/**
+ * FVG Rendering Engine
+ */
+function clearFvgSeries() {
+    if (fvgSeriesList && fvgSeriesList.length > 0) {
+        fvgSeriesList.forEach(series => {
+            try {
+                if (chart) chart.removeSeries(series);
+            } catch (e) {
+                console.error("Error removing FVG series:", e);
+            }
+        });
+    }
+    fvgSeriesList = [];
+}
+
+function drawFvgSeries(fvgData) {
+    clearFvgSeries();
+    if (!fvgEnabled || !fvgData || !chart) return;
+
+    // Limit the number of visible FVG zones to prevent overloading/visual clutter
+    const limit = 20;
+    const items = fvgData.slice(-limit);
+
+    items.forEach(fvg => {
+        const isBullish = fvg.type === 'bullish';
+        
+        // Premium glassmorphic semi-transparent palettes
+        const topColor = isBullish ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)';
+        const bottomColor = isBullish ? 'rgba(16, 185, 129, 0.02)' : 'rgba(239, 68, 68, 0.02)';
+        const lineColor = isBullish ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)';
+
+        try {
+            const areaSeries = chart.addSeries(LightweightCharts.AreaSeries, {
+                topColor: topColor,
+                bottomColor: bottomColor,
+                lineColor: lineColor,
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Dashed,
+                lastValueVisible: false,
+                priceLineVisible: false,
+                crosshairMarkerVisible: false,
+                baseValue: {
+                    type: 'price',
+                    price: fvg.bottom
+                }
+            });
+
+            areaSeries.setData([
+                { time: fvg.start_time, value: fvg.top },
+                { time: fvg.end_time, value: fvg.top }
+            ]);
+
+            fvgSeriesList.push(areaSeries);
+        } catch (err) {
+            console.error("Failed to render individual FVG band:", err, fvg);
+        }
+    });
+    console.log(`Rendered ${fvgSeriesList.length} FVG bands on chart.`);
+}
+
+// Bind click handler for FVG Toggle button
+if (fvgBtn) {
+    fvgBtn.onclick = () => {
+        fvgEnabled = !fvgEnabled;
+        if (fvgEnabled) {
+            // Active state styling
+            fvgBtn.style.background = 'rgba(16, 185, 129, 0.4)';
+            fvgBtn.style.borderColor = '#10b981';
+            fvgBtn.style.boxShadow = '0 0 10px rgba(16, 185, 129, 0.5)';
+            drawFvgSeries(activeFvgData);
+        } else {
+            // Inactive state styling
+            fvgBtn.style.background = 'rgba(16, 185, 129, 0.15)';
+            fvgBtn.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+            fvgBtn.style.boxShadow = 'none';
+            clearFvgSeries();
+        }
+    };
+}
+

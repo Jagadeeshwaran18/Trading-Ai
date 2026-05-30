@@ -22,10 +22,29 @@ from contextlib import asynccontextmanager
 def get_display_name(symbol):
     return config.SYMBOL_MAP.get(symbol, symbol)
 
+# Global state for risk management
+daily_loss = 0.0
+last_reset_date = datetime.now().date()
+
 def trading_loop():
+    global daily_loss, last_reset_date
     """Background task that runs the trading analysis loop in a dedicated thread."""
     time.sleep(2)  # Give the web server 2 seconds to boot before heavily fetching data
     while True:
+        # 1. Check for day reset
+        today = datetime.now().date()
+        if today > last_reset_date:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] New trading day. Resetting daily loss.", flush=True)
+            daily_loss = 0.0
+            last_reset_date = today
+
+        # 2. Check Max Daily Loss Limit
+        max_loss_limit = config.TOTAL_CAPITAL * (config.MAX_DAILY_LOSS_PCT / 100)
+        if daily_loss >= max_loss_limit:
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] ALERT: Max daily loss limit (${max_loss_limit}) hit. AI Trading suspended.", flush=True)
+            time.sleep(60) 
+            continue
+
         print(f"\n[{datetime.now().strftime('%H:%M:%S')}] Starting dynamic trading cycle...", flush=True)
         for symbol in config.WATCHLIST:
             try:
@@ -173,11 +192,19 @@ def get_market_data(symbol: str, range: str = "1d", interval: str = "5m"):
         current_price = info.get("lastPrice", df.iloc[-1]["Close"])
         daily_change = (current_price - previous_close) / previous_close if previous_close else 0
 
+        # Calculate FVGs
+        fvg_data = []
+        try:
+            fvg_data = ai.fvg_engine.detect_fvgs(df)
+        except Exception as fvg_err:
+            print(f"FVG calculation error in market-data API: {fvg_err}")
+
         return {
             "previousClose": previous_close, 
             "currentPrice": current_price,
             "dailyChange": daily_change,
-            "data": data
+            "data": data,
+            "fvg": fvg_data
         }
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
@@ -233,10 +260,16 @@ def get_ai_analysis(symbol: str):
         signal = signals[0]
         
         # Construct conversational reasoning
-        trend_desc = "bullish" if signal['trend'] == "BULLISH" else "bearish"
+        trend_desc = "bullish" if "BULLISH" in signal['trend'] else "bearish"
         rsi_desc = "overbought" if signal['rsi'] > 70 else ("oversold" if signal['rsi'] < 30 else "neutral")
         
-        reasoning = f"The asset is currently in a {trend_desc} trend with an {rsi_desc} RSI of {signal['rsi']}. "
+        fvg_reason = ""
+        if "FVG Buy" in signal['trend']:
+            fvg_reason = "Price has pulled back into an active Bullish Fair Value Gap (FVG) support zone, signaling a high-probability demand bounce. "
+        elif "FVG Sell" in signal['trend']:
+            fvg_reason = "Price has rallied into an active Bearish Fair Value Gap (FVG) resistance zone, signaling potential distribution and selling pressure. "
+
+        reasoning = f"The asset is currently in a {trend_desc} trend with an {rsi_desc} RSI of {signal['rsi']}. {fvg_reason}"
         
         allocation_suggestion = ai.calculate_allocation(signal['action'], signal['confidence'], signal['rsi'], signal['trend'])
         

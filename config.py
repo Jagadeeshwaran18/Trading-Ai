@@ -13,8 +13,15 @@ SYMBOL_MAP = {
     "BTC-USD": "BITCOIN",
     "ETH-USD": "ETHEREUM"
 }
-INTERVAL_MINUTES = 3
+INTERVAL_MINUTES = 1 # Lowered for more responsive trailing stops
 RISK_FREE_RATE = 0.05  # Approximate risk-free rate (5%)
+
+# Risk Management Settings
+ATR_PERIOD = 14
+ATR_MULTIPLIER = 1.5
+RISK_REWARD_RATIO = 2.0
+TOTAL_CAPITAL = 100000 # Default capital for max daily loss calculation
+MAX_DAILY_LOSS_PCT = 5.0 # Stop trading if 5% of capital is lost
 
 # Analysis Settings
 # Range for calculating RSI
